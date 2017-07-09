@@ -1,0 +1,12 @@
+[package]
+name = "nbody"
+version = "0.0.1"
+authors = ["Sean Anderson <seanga2@gmail.com>"]
+
+[[bin]]
+name = "nbody"
+path = "src/nbody.rs"
+
+[dependencies]
+rayon = "0.8.2"
+sfml = "0.12.0"
