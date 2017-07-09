@@ -9,4 +9,7 @@ path = "src/nbody.rs"
 
 [dependencies]
 rayon = "0.8.2"
-sfml = "0.12.0"
+
+[dependencies.sfml]
+git = "https://github.com/jeremyletang/rust-sfml.git"
+branch = "rcsprite"

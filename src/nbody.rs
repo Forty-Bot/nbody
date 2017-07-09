@@ -4,6 +4,7 @@
 use math::{vec2, Additive};
 mod math;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::ops::Deref;
@@ -17,8 +18,8 @@ extern crate sfml;
 
 use sfml::system::{Clock, Time, Vector2f, Vector2i};
 use sfml::window::{ContextSettings, Event, Key, style, VideoMode,};
-use sfml::graphics::{Color, Drawable, Font, Image, RenderWindow, RenderTarget, Sprite, Text, Texture,
-	TextureRef, Transformable, View};
+use sfml::graphics::{Color, Drawable, Font, Image, RcSprite, RenderWindow, RenderTarget, Sprite, Text,
+	Texture, TextureRef, Transformable, View};
 
 #[derive(Clone, Copy, Debug)]
 struct Object {
@@ -99,10 +100,18 @@ fn integrate(state: &[Object], t: f32, dt: f32) -> Vec<Object> {
 		.collect()
 }
 
+fn preload_tex(cache: &mut HashMap<String, Rc<Texture>>, path: &str) {
+	cache.entry(path.into()).or_insert({
+		let img = Image::from_file(&path).expect(&format!("cannot load texture from {}", path));
+		img.create_mask_from_color(&Color::black(), 0);
+		Rc::new(Texture::from_image(&img).expect("could not convert image to texture"))
+	});
+}
+
 fn main() {
 	
 	let mut window = RenderWindow::new(VideoMode::desktop_mode(), "nbody", style::DEFAULT,
-		&ContextSettings::default()).expect("unable to create window");
+		&ContextSettings::default());
 	window.set_framerate_limit(60);
 
 	let mut line = String::new();
@@ -113,16 +122,15 @@ fn main() {
 	io::stdin().read_line(&mut line);
 	line.trim();
 	let r: f32 = line.trim().parse().expect(&format!("invalid universe size: {}", line));
-	let mut view = View::new_init(&Vector2f::new(0.0, 0.0), &Vector2f::new(2.0 * r, 2.0 * r));
+	let mut view = View::new(Vector2f::new(0.0, 0.0), Vector2f::new(2.0 * r, 2.0 * r));
 	window.set_view(&view);
 	line.clear();
 
 	let mut state = Vec::new();
-	let mut tex_preload = HashSet::new();
-	let mut tex_cache = HashMap::new();
-	let mut tex_paths = Vec::new();
+	let mut tex_cache: RefCell<HashMap<String, _>> = RefCell::new(HashMap::new());
 	let mut gfx = Vec::new();
 	let def = window.default_view().size();
+	let mut tmp = Vec::new();
 	for i in 0..num_objs {
 		line.clear();
 		io::stdin().read_line(&mut line);
@@ -146,31 +154,25 @@ fn main() {
 		});
 
 		let path = format!("img/{}", iter.next().unwrap().parse::<String>().unwrap());
-		tex_preload.insert(path.clone());
-		tex_paths.push(path);
-	}
 
-	for path in tex_preload {
-		let img = Image::from_file(&path).expect(&format!("cannot load texture from {}", path));
-		img.create_mask_from_color(&Color::black(), 0);
-		let tex = Texture::from_image(&img).expect("could not convert image to texture");
-		tex_cache.insert(String::from(path), Rc::new(tex));
+		preload_tex(&mut tex_cache.borrow_mut(), &path);
+		tmp.push(path);
 	}
-	
-	for path in tex_paths {
-		let tex = tex_cache.get(&path).unwrap();
-		let mut s = Sprite::with_texture(&tex);
+		
+	for path in tmp {
+		let tex = tex_cache.borrow().get(&path).unwrap().clone();
 		let sz = tex.size();
-		s.set_origin2f(sz.x as f32 / 2.0, sz.y as f32 / 2.0);
-		s.scale2f(2.0 * r / def.x, 2.0 * r / def.y);
+		let mut s = RcSprite::with_texture(tex);
+		s.set_origin((sz.x as f32 / 2.0, sz.y as f32 / 2.0));
+		s.scale((2.0 * r / def.x, 2.0 * r / def.y));
 		gfx.push(s);
 	}
 
 	let hack = Font::from_file("/usr/share/fonts/TTF/Hack-Regular.ttf").expect("cannot load Hack font");
-	let mut fps_counter = Text::new();
+	let mut fps_counter = Text::default();
 	fps_counter.set_font(&hack);
-	fps_counter.set_position(&window.map_pixel_to_coords_current_view(&Vector2i::new(0, 0)));
-	fps_counter.scale2f(2.0 * r / def.x, 2.0 * r / def.y);
+	fps_counter.set_position(window.map_pixel_to_coords_current_view(&Vector2i::new(0, 0)));
+	fps_counter.scale((2.0 * r / def.x, 2.0 * r / def.y));
 
 	let mut left = false;
 	let mut right = false;
@@ -216,10 +218,10 @@ fn main() {
 			}
 		}
 		let size = view.size();
-		if left { view.move2f(size.x * -0.001, 0.0) }
-		if right { view.move2f(size.x * 0.001, 0.0) }
-		if up { view.move2f(0.0, size.y * -0.001) }
-		if down { view.move2f(0.0, size.y * 0.001) }
+		if left { view.move_((size.x * -0.001, 0.0)) }
+		if right { view.move_((size.x * 0.001, 0.0)) }
+		if up { view.move_((0.0, size.y * -0.001)) }
+		if down { view.move_((0.0, size.y * 0.001)) }
 		window.set_view(&view);
 		
 		let frame_time = clk.restart().as_seconds();
@@ -236,8 +238,9 @@ fn main() {
 		window.clear(&Color::black());
 		
 		for (o, mut s) in state.iter().zip(gfx.iter_mut()) {
-			s.set_position2f(o.s.x, o.s.y);
-			window.draw(s)
+			s.set_position((o.s.x, o.s.y));
+			let sprite: &Sprite = &*s;
+			window.draw(sprite)
 		}
 
 		fps_counter.set_string(&format!("{:.0}\n{}", 1.0 / frame_time, mult));
